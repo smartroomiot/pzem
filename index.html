@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Giám Sát Thông Minh - SmartHome ESP32</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS (xlsx) để xuất file Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Firebase SDK v8 -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+</head>
+<body class="bg-gray-100 font-sans min-h-screen flex flex-col justify-between">
+
+    <!-- Header -->
+    <header class="bg-blue-600 text-white shadow-md py-4 px-6 flex justify-between items-center">
+        <h1 class="text-xl font-bold">🏠 GIÁM SÁT AN TOÀN ĐIỆN & PCCC ESP32</h1>
+        <div id="realtime-clock" class="text-sm bg-blue-700 px-3 py-1 rounded shadow-inner">--/--/---- --:--:--</div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="container mx-auto p-4 md:p-6 flex-grow space-y-6">
+
+        <!-- Banner Cảnh Báo Khẩn Cấp -->
+        <div id="alert-banner" class="hidden bg-red-600 text-white p-4 rounded-lg shadow-lg flex justify-between items-center animate-pulse">
+            <div class="flex items-center space-x-3">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                <div>
+                    <h2 class="font-bold text-lg" id="alert-title">CẢNH BÁO NGUY HIỂM!</h2>
+                    <p id="alert-desc" class="text-sm">Hệ thống đang phát hiện sự cố khẩn cấp.</p>
+                </div>
+            </div>
+            <button onclick="toggleWebBuzzer()" id="buzzer-web-btn" class="bg-white text-red-600 font-bold px-4 py-2 rounded shadow hover:bg-gray-100 transition">
+                🔊 Bật Còi Web
+            </button>
+        </div>
+
+        <!-- Thẻ Thống Kê Thông Số -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white p-5 rounded-lg shadow border-l-4 border-blue-500">
+                <p class="text-gray-500 text-sm">Điện Áp (Voltage)</p>
+                <h3 class="text-3xl font-bold text-gray-800 mt-1"><span id="val-voltage">--</span> <span class="text-lg font-normal text-gray-500">V</span></h3>
+            </div>
+            <div class="bg-white p-5 rounded-lg shadow border-l-4 border-green-500">
+                <p class="text-gray-500 text-sm">Dòng Điện (Current)</p>
+                <h3 class="text-3xl font-bold text-gray-800 mt-1"><span id="val-current">--</span> <span class="text-lg font-normal text-gray-500">A</span></h3>
+            </div>
+            <div class="bg-white p-5 rounded-lg shadow border-l-4 border-yellow-500">
+                <p class="text-gray-500 text-sm">Công Suất (Power)</p>
+                <h3 class="text-3xl font-bold text-gray-800 mt-1"><span id="val-power">--</span> <span class="text-lg font-normal text-gray-500">W</span></h3>
+            </div>
+            <div class="bg-white p-5 rounded-lg shadow border-l-4 border-purple-500">
+                <p class="text-gray-500 text-sm">Trạng Thái Hệ Thống</p>
+                <h3 id="val-status" class="text-xl font-bold text-green-600 mt-2">Đang kết nối...</h3>
+            </div>
+        </div>
+
+        <!-- Trạng Thái Cảm Biến & Tiện Ích -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="bg-white p-5 rounded-lg shadow space-y-4">
+                <h3 class="font-bold text-gray-700 text-lg border-b pb-2">Trạng Thái Cảm Biến Thời Gian Thực</h3>
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-600">Cảm biến chuyển động (PIR):</span>
+                    <span id="status-motion" class="px-3 py-1 rounded text-sm font-semibold bg-gray-200 text-gray-700">Đang kiểm tra</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-600">Cảm biến khói (Smoke):</span>
+                    <span id="status-smoke" class="px-3 py-1 rounded text-sm font-semibold bg-gray-200 text-gray-700">Đang kiểm tra</span>
+                </div>
+            </div>
+
+            <div class="bg-white p-5 rounded-lg shadow flex flex-col justify-between">
+                <div>
+                    <h3 class="font-bold text-gray-700 text-lg border-b pb-2">Điều Khiển & Tiện Ích Web</h3>
+                    <p class="text-sm text-gray-500 mt-2">Chỉ ghi nhận sự kiện Cháy, Quên tắt điện và Phát hiện có người vào lịch sử Firebase.</p>
+                </div>
+                <div class="mt-4 flex space-x-3">
+                    <button onclick="exportToExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded shadow font-medium transition flex items-center space-x-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <span>Xuất File Excel Sự Kiện</span>
+                    </button>
+                    <button onclick="clearHistory()" class="bg-red-100 hover:bg-red-200 text-red-700 px-4 py-2 rounded shadow font-medium transition">
+                        Xóa Lịch Sử Cũ
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bảng Lịch Sử Sự Kiện Cảnh Báo -->
+        <div class="bg-white rounded-lg shadow overflow-hidden">
+            <div class="px-6 py-4 border-b flex justify-between items-center">
+                <h3 class="font-bold text-gray-700 text-lg">Lịch Sử Sự Kiện & Cảnh Báo (Đồng bộ Firebase)</h3>
+                <span class="text-xs text-gray-400">Tự động ghi nhận và lưu trữ</span>
+            </div>
+            <div class="overflow-x-auto max-h-80">
+                <table class="w-auto min-w-full text-left border-collapse">
+                    <thead class="bg-gray-50 text-gray-600 text-xs uppercase sticky top-0">
+                        <tr>
+                            <th class="py-3 px-6 border-b">STT</th>
+                            <th class="py-3 px-6 border-b">Thời Gian Thực</th>
+                            <th class="py-3 px-6 border-b">Nội Dung Sự Kiện / Cảnh Báo</th>
+                            <th class="py-3 px-6 border-b">Mức Độ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="event-log-table" class="text-gray-700 text-sm divide-y divide-gray-200">
+                        <!-- Dữ liệu được tải từ Firebase -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t text-center py-4 text-sm text-gray-500 mt-6">
+        Hệ thống IoT Giám Sát Điện Năng & An Toàn - Xây dựng cho ESP32 & Firebase
+    </footer>
+
+    <!-- Script Xử Lý -->
+    <script>
+        const firebaseConfig = {
+            databaseURL: "https://smarthome-esp32-337d6-default-rtdb.firebaseio.com/"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        let eventLogs = [];
+        let audioCtx = null;
+        let isWebBuzzerActive = false;
+        let buzzerInterval = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playBeep() {
+            initAudio();
+            if (!audioCtx) return;
+            let osc = audioCtx.createOscillator();
+            let gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = 880;
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.15);
+        }
+
+        function toggleWebBuzzer() {
+            isWebBuzzerActive = !isWebBuzzerActive;
+            const btn = document.getElementById('buzzer-web-btn');
+            if (isWebBuzzerActive) {
+                btn.innerText = "🔇 Tắt Còi Web";
+                btn.classList.replace('bg-white', 'bg-yellow-300');
+                btn.classList.replace('text-red-600', 'text-gray-900');
+                if (!buzzerInterval) {
+                    buzzerInterval = setInterval(() => {
+                        if (isWebBuzzerActive) playBeep();
+                    }, 300);
+                }
+            } else {
+                btn.innerText = "🔊 Bật Còi Web";
+                btn.classList.replace('bg-yellow-300', 'bg-white');
+                btn.classList.replace('text-gray-900', 'text-red-600');
+                if (buzzerInterval) {
+                    clearInterval(buzzerInterval);
+                    buzzerInterval = null;
+                }
+            }
+        }
+
+        // Đồng hồ thời gian thực ở Header
+        setInterval(() => {
+            const now = new Date();
+            document.getElementById('realtime-clock').innerText = now.toLocaleString('vi-VN');
+        }, 1000);
+
+        // --- LẮNG NGHE DỮ LIỆU THỜI GIAN THỰC TỪ /SmartHome ---
+        const smartHomeRef = db.ref('/SmartHome');
+        const historyRef = db.ref('/HistoryLogs');
+        let lastStatus = "";
+        let lastMotionState = null;
+
+        smartHomeRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (!data) return;
+
+            document.getElementById('val-voltage').innerText = data.voltage !== undefined ? data.voltage.toFixed(1) : "--";
+            document.getElementById('val-current').innerText = data.current !== undefined ? data.current.toFixed(1) : "--";
+            document.getElementById('val-power').innerText = data.power !== undefined ? data.power.toFixed(1) : "--";
+
+            // PIR
+            const motionEl = document.getElementById('status-motion');
+            if (data.motion === 1) {
+                motionEl.innerText = "Phát hiện có người";
+                motionEl.className = "px-3 py-1 rounded text-sm font-semibold bg-green-100 text-green-700";
+            } else {
+                motionEl.innerText = "Không có người";
+                motionEl.className = "px-3 py-1 rounded text-sm font-semibold bg-gray-200 text-gray-700";
+            }
+
+            // CHỈ GHI NHẬN KHI PHÁT HIỆN CÓ NGƯỜI (motion === 1), bỏ qua trạng thái không có người
+            if (lastMotionState !== null && lastMotionState !== data.motion) {
+                if (data.motion === 1) {
+                    pushEventLog("Phát hiện có người", "Chuyển động");
+                }
+            }
+            lastMotionState = data.motion;
+
+            // Smoke
+            const smokeEl = document.getElementById('status-smoke');
+            if (data.smoke === 0) {
+                smokeEl.innerText = "CÓ KHÓI / NGUY HIỂM";
+                smokeEl.className = "px-3 py-1 rounded text-sm font-semibold bg-red-100 text-red-700 animate-bounce";
+            } else {
+                smokeEl.innerText = "An toàn (Không khói)";
+                smokeEl.className = "px-3 py-1 rounded text-sm font-semibold bg-green-100 text-green-700";
+            }
+
+            const statusEl = document.getElementById('val-status');
+            const bannerEl = document.getElementById('alert-banner');
+            const alertTitle = document.getElementById('alert-title');
+            const alertDesc = document.getElementById('alert-desc');
+
+            statusEl.innerText = data.statusText || "AN TOAN";
+
+            if (data.statusText && data.statusText !== "AN TOAN") {
+                bannerEl.classList.remove('hidden');
+                alertTitle.innerText = "CẢNH BÁO: " + data.statusText;
+                alertDesc.innerText = "Hệ thống ghi nhận sự cố khẩn cấp lúc " + new Date().toLocaleTimeString('vi-VN');
+                statusEl.className = "text-xl font-bold text-red-600 mt-2 animate-pulse";
+
+                if (!isWebBuzzerActive) toggleWebBuzzer();
+
+                if (data.statusText !== lastStatus) {
+                    pushEventLog(data.statusText, "Nguy hiểm / Cảnh báo");
+                    lastStatus = data.statusText;
+                }
+            } else {
+                bannerEl.classList.add('hidden');
+                statusEl.className = "text-xl font-bold text-green-600 mt-2";
+                if (isWebBuzzerActive) toggleWebBuzzer();
+
+                if (lastStatus && lastStatus !== "AN TOAN") {
+                    pushEventLog("Hệ thống trở lại trạng thái An Toàn", "Thông tin");
+                    lastStatus = "AN TOAN";
+                }
+                if (!lastStatus) lastStatus = "AN TOAN";
+            }
+        });
+
+        // Hàm đẩy log sự kiện kèm thời gian thực chuẩn vào Firebase
+        function pushEventLog(message, level) {
+            const now = new Date();
+            const timeStr = now.toLocaleString('vi-VN');
+            const newLogRef = historyRef.push();
+            newLogRef.set({
+                time: timeStr,
+                event: message,
+                level: level,
+                timestamp: now.getTime()
+            });
+        }
+
+        // --- LẮNG NGHE LỊCH SỬ TỪ /HistoryLogs ĐỂ HIỂN THỊ ---
+        historyRef.orderByChild('timestamp').on('value', (snapshot) => {
+            const tbody = document.getElementById('event-log-table');
+            tbody.innerHTML = '';
+            eventLogs = [];
+            
+            const data = snapshot.val();
+            if (!data) return;
+
+            let logsArray = Object.keys(data).map(key => ({
+                id: key,
+                ...data[key]
+            }));
+
+            // Sắp xếp tăng dần theo thời gian
+            logsArray.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+            let stt = 1;
+            logsArray.forEach((log) => {
+                let timeDisplay = log.time || (log.timestamp ? new Date(log.timestamp).toLocaleString('vi-VN') : "--");
+
+                eventLogs.push({
+                    stt: stt,
+                    time: timeDisplay,
+                    event: log.event,
+                    level: log.level
+                });
+
+                const row = document.createElement('tr');
+                const isDanger = log.level && log.level.includes("Nguy hiểm");
+                const isMotion = log.level && log.level.includes("Chuyển động");
+                
+                let badgeColor = 'bg-blue-200 text-blue-800';
+                if (isDanger) badgeColor = 'bg-red-200 text-red-800';
+                else if (isMotion) badgeColor = 'bg-green-200 text-green-800';
+
+                row.className = isDanger ? "bg-red-50 hover:bg-red-100" : "hover:bg-gray-50";
+                row.innerHTML = `
+                    <td class="py-3 px-6 border-b">${stt}</td>
+                    <td class="py-3 px-6 border-b">${timeDisplay}</td>
+                    <td class="py-3 px-6 border-b font-medium">${log.event || "Không rõ sự kiện"}</td>
+                    <td class="py-3 px-6 border-b"><span class="px-2 py-1 rounded text-xs ${badgeColor}">${log.level || "Thông tin"}</span></td>
+                `;
+                tbody.insertBefore(row, tbody.firstChild);
+                stt++;
+            });
+        });
+
+        // Xóa lịch sử trên Firebase
+        function clearHistory() {
+            if (confirm("Bạn có chắc chắn muốn xóa sạch toàn bộ lịch sử trên Database không?")) {
+                historyRef.remove().then(() => {
+                    alert("Đã xóa sạch lịch sử!");
+                });
+            }
+        }
+
+        // Xuất file Excel
+        function exportToExcel() {
+            if (eventLogs.length === 0) {
+                alert("Chưa có sự kiện nào để xuất file!");
+                return;
+            }
+
+            const wsData = [
+                ["STT", "Thời Gian Thực", "Sự Kiện", "Mức Độ"]
+            ];
+            eventLogs.forEach(item => {
+                wsData.push([item.stt, item.time, item.event, item.level]);
+            });
+
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(wsData);
+            XLSX.utils.book_append_sheet(wb, ws, "LichSuCanhBao");
+
+            XLSX.writeFile(wb, "LichSuCanhBao_SmartHome.xlsx");
+        }
+    </script>
+</body>
+</html>
